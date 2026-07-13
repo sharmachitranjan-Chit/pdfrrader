@@ -1,0 +1,71 @@
+name: Build Clarity PDF APK from ZIP
+
+on:
+  workflow_dispatch:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download uploaded ZIP
+        uses: actions/checkout@v4
+
+      - name: Check and extract the Android project
+        shell: bash
+        run: |
+          test -f Clarity-PDF-Android-v1.0-Source.zip
+          mkdir extracted-project
+          unzip -q Clarity-PDF-Android-v1.0-Source.zip -d extracted-project
+
+          if [ -f extracted-project/package.json ]; then
+            APP_DIR="$GITHUB_WORKSPACE/extracted-project"
+          else
+            PACKAGE_FILE=$(find extracted-project -name package.json -not -path '*/node_modules/*' -print -quit)
+            test -n "$PACKAGE_FILE"
+            APP_DIR="$GITHUB_WORKSPACE/$(dirname "$PACKAGE_FILE")"
+          fi
+
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+
+      - name: Install project packages
+        working-directory: ${{ env.APP_DIR }}
+        run: npm ci
+
+      - name: Build and sync Android project
+        working-directory: ${{ env.APP_DIR }}
+        run: npm run android:sync
+
+      - name: Compile installable APK
+        working-directory: ${{ env.APP_DIR }}/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Rename finished APK
+        run: cp "$APP_DIR/android/app/build/outputs/apk/debug/app-debug.apk" Clarity-PDF-v1.0.apk
+
+      - name: Upload APK for download
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clarity-PDF-Android-APK
+          path: Clarity-PDF-v1.0.apk
+          if-no-files-found: error
+          retention-days: 30
